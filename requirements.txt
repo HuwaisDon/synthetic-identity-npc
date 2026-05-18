@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+chromadb
+networkx
+sentence-transformers
+numpy
+loguru
+pydantic
+python-dotenv

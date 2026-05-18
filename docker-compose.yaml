@@ -1,0 +1,13 @@
+services:
+  npc-backend:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data/chromadb:/app/data/chromadb   # persist embeddings
+      - .:/app                                # live reload during dev
+    environment:
+      - CHROMA_PERSIST_DIR=/app/data/chromadb
+      - EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+      - LOG_LEVEL=DEBUG
+    restart: unless-stopped
