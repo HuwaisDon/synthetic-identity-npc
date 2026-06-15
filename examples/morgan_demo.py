@@ -151,7 +151,7 @@ def print_header(title: str) -> None:
 
 
 def print_turn_output(output) -> None:
-    summary = output.cognitive_state.cognitive_summary
+    summary = output.cognitive_summary
 
     print(f"\n[COGNITIVE BRIEF — sent to LLM]")
     print(output.prompt_block)

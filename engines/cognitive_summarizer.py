@@ -398,13 +398,18 @@ class CognitiveSummarizer:
             signals.append("occasional contradictions in how she characterizes her own actions")
 
         if attention_state.state == AttentionalState.FLOODED:
-            signals.append("loses the thread; returns to the same phrase more than once")
+            signals.append("frequent, heavy silences; her gaze drifts as if she's no longer in the room")
+            signals.append("repetitive phrasing; she seems to be caught in a mental loop")
+        elif attention_state.state == AttentionalState.STRESSED:
+            signals.append("rapid blinking; her breathing is shallow and uneven")
 
         if goal_state.goal_conflict_score > 0.6:
             signals.append("starts sentences and redirects mid-thought")
 
         if goal_state.concealment_pressure > 0.7:
             signals.append("too quick to offer alternative topics")
+        elif goal_state.concealment_pressure > 0.45:
+            signals.append("answers around the memory rather than naming it directly")
 
         return signals
 

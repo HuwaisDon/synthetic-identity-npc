@@ -8,22 +8,38 @@ Both are needed. Neither alone is sufficient.
 """
 
 import os
-from loguru import logger
-import os
-import shutil
 
+os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+
+from loguru import logger
 import chromadb
-# from chromadb.config import Settings
+from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 
 from schemas.memory_schema import MemoryNode
 
 
 EMBED_MODEL_NAME = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "./data/chromadb")
+DEFAULT_CHROMA_PERSIST_DIR = "./data/chromadb"
 
 # Lazy-load embedding model — don't load until first use (saves RAM)
 _embed_model: SentenceTransformer | None = None
+
+
+def disable_chroma_telemetry() -> None:
+    """
+    Keep Chroma's optional telemetry from breaking local runtime tests.
+
+    Some Chroma/PostHog version combinations call posthog.capture with an
+    outdated signature. Telemetry should never affect cognition runtime.
+    """
+    try:
+        import posthog
+
+        posthog.disabled = True
+        posthog.capture = lambda *args, **kwargs: None
+    except Exception:
+        pass
 
 
 def get_embed_model() -> SentenceTransformer:
@@ -49,23 +65,30 @@ class MemoryStore:
     Persists to disk between sessions.
     """
 
-    def __init__(self, npc_id: str):
+    def __init__(self, npc_id: str, persist_dir: str | None = None):
 
         self.npc_id = npc_id
         self.collection_name = f"memories_{npc_id}"
+        self.persist_dir = persist_dir or os.getenv(
+            "CHROMA_PERSIST_DIR",
+            DEFAULT_CHROMA_PERSIST_DIR,
+        )
 
         # Ensure persistence path is a DIRECTORY
-        if os.path.exists(CHROMA_PERSIST_DIR):
+        if os.path.exists(self.persist_dir):
 
             # If somehow a file exists with same name, remove it
-            if os.path.isfile(CHROMA_PERSIST_DIR):
-                os.remove(CHROMA_PERSIST_DIR)
+            if os.path.isfile(self.persist_dir):
+                os.remove(self.persist_dir)
 
         else:
-            os.makedirs(CHROMA_PERSIST_DIR, exist_ok=True)
+            os.makedirs(self.persist_dir, exist_ok=True)
+
+        disable_chroma_telemetry()
 
         self.client = chromadb.PersistentClient(
-            path=CHROMA_PERSIST_DIR
+            path=self.persist_dir,
+            settings=Settings(anonymized_telemetry=False),
         )
 
         self.collection = self.client.get_or_create_collection(

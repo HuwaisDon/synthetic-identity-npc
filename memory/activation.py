@@ -48,6 +48,7 @@ class ActivationEngine:
         for memory_id, semantic_score, metadata in retrieved_memories:
 
             emotional_weight = metadata.get("emotional_weight", 0.5)
+            emotional_weight = max(0.0, min(1.0, emotional_weight / 10.0))
             suppression_level = metadata.get("suppression_level", 0.0)
             valence = metadata.get("valence", 0.0)
 

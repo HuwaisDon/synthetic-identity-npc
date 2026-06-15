@@ -241,6 +241,20 @@ class PredictiveState:
 
 
 # ─────────────────────────────────────────────
+# REGULATION ENGINE STATE
+# ─────────────────────────────────────────────
+
+@dataclass
+class RegulationState:
+    """Tracks the metabolic cost of emotional regulation and habituation."""
+    regulation_energy: float = 1.0       # 1.0 (fresh) to 0.0 (exhausted)
+    suppression_fatigue: float = 0.0     # 0.0 to 1.0 (rigid walls breaking)
+    habituation_level: float = 0.0       # Mean reactivity reduction across focal nodes
+    attentional_flexibility: float = 0.0 # 0.0 (rigid) to 1.0 (drifting/open)
+    defensive_rigidity: float = 1.0      # 1.0 (impenetrable) to 0.3 (leaky)
+
+
+# ─────────────────────────────────────────────
 # COGNITIVE SUMMARY (LLM INPUT LAYER)
 # ─────────────────────────────────────────────
 
@@ -280,6 +294,10 @@ class CognitiveSummary:
     attentional_state: str = "open"
     cognitive_load_descriptor: str = "clear"   # "clear", "strained", "overwhelmed"
 
+    # Regulation signals
+    regulation_fatigue_level: float = 0.0
+    is_habitubated: bool = False
+
     # Behavioral output guidance
     response_style: str = "direct"             # "guarded", "deflecting", "fragmented", "flat"
     leakage_signals: list[str] = field(default_factory=list)   # behavioral tells
@@ -305,4 +323,5 @@ class NPCCognitiveState:
     persistence_state: EmotionalPersistenceState = field(default_factory=EmotionalPersistenceState)
     self_concept_state: SelfConceptState = field(default_factory=SelfConceptState)
     predictive_state: PredictiveState = field(default_factory=PredictiveState)
+    regulation_state: RegulationState = field(default_factory=RegulationState)
     cognitive_summary: CognitiveSummary = field(default_factory=CognitiveSummary)

@@ -177,7 +177,7 @@ async def process_turn(npc_id: str, request: TurnRequest):
 
     is_debug = os.environ.get("NPC_DEBUG_MODE", "false").lower() == "true"
 
-    summary = output.cognitive_state.cognitive_summary
+    summary = output.cognitive_summary
 
     return TurnResponse(
         npc_response=output.npc_response,

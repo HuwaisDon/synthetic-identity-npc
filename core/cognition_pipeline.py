@@ -35,7 +35,7 @@ from dataclasses import dataclass, field
 
 from schemas.cognitive_schemas import (
     EmotionalState, EmotionalReading, EmotionType,
-    NPCCognitiveState
+    NPCCognitiveState,CognitiveSummary,
 )
 from engines.goal_engine import GoalEngine, build_morgan_goal_profile
 from engines.attention_engine import AttentionEngine
@@ -43,7 +43,18 @@ from engines.emotional_persistence import EmotionalPersistenceEngine
 from engines.self_concept_defense import SelfConceptDefenseSystem
 from engines.predictive_simulation import PredictiveSimulationEngine
 from engines.cognitive_summarizer import CognitiveSummarizer
+from engines.suppression_engine import SuppressionEngine
+from llm.gemini_client import GeminiClient
+# from llm.openrouter_client import OpenRouterClient
+from llm.prompt_builder import BehavioralPromptBuilder
+from llm.response_validator import ResponseValidator
 from persistence.npc_state_store import NPCStateStore
+
+
+from memory.memory_store import MemoryStore
+from memory.activation import ActivationEngine
+from memory.spreading import SpreadingActivationEngine
+from memory.morgan_memories import MORGAN_MEMORIES
 
 logger = logging.getLogger(__name__)
 
@@ -65,12 +76,20 @@ class TurnInput:
 
 @dataclass
 class TurnOutput:
-    """Full output of a pipeline turn, including NPC response and internal state."""
     npc_response: str
     cognitive_state: NPCCognitiveState
-    prompt_block: str                        # the LLM prompt that was used
-    activated_nodes: dict                    # node_id -> activation_score
-    cognitive_summary_text: str             # rendered summary (for debugging)
+    prompt_block: str
+    activated_nodes: dict
+
+    cognitive_summary: CognitiveSummary | None = None
+    cognitive_summary_text: str = ""
+
+    retrieved_memories: list = field(default_factory=list)
+    activated_memories: list = field(default_factory=list)
+    spread_results: list = field(default_factory=list)
+    suppression_results: list = field(default_factory=list)
+    attention_activation_scores: dict = field(default_factory=dict)
+    activation_emotional_state: dict = field(default_factory=dict)
     processing_time_ms: float = 0.0
 
 
@@ -92,7 +111,7 @@ class CognitionPipeline:
         npc_name: str = "Morgan",
         character_brief: str = "",
         state_store: Optional[NPCStateStore] = None,
-        llm_caller = None,   # callable: (str) -> str
+        llm_client = None,
         memory_retriever = None,   # callable: (str, str) -> dict[str, float]
         activation_spreader = None,  # callable: (list[str], dict) -> dict[str, float]
     ):
@@ -100,14 +119,26 @@ class CognitionPipeline:
         self.npc_name = npc_name
         self.character_brief = character_brief
         self.state_store = state_store or NPCStateStore()
-        self.llm_caller = llm_caller or _default_llm_caller
-        self.memory_retriever = memory_retriever or _stub_memory_retriever
-        self.activation_spreader = activation_spreader or _stub_activation_spreader
+        self.llm_client = llm_client or GeminiClient()
+        # self.llm_client = OpenRouterClient()
+        self.memory_retriever = memory_retriever
+        self.activation_spreader = activation_spreader
+        self.memory_store = MemoryStore(npc_id)
+        self.activation_engine = ActivationEngine()
+        self.spreading_engine = SpreadingActivationEngine()
+        self.suppression_engine = SuppressionEngine()
+        self._load_seed_memories()
+        self._last_emotional_state = EmotionalState()
+        
 
         # Conversation history for LLM context
         self._conversation_history: list[dict] = []
         self._turn_count: int = 0
+        self._focal_history: list[list[str]] = []
         self._player_trust: float = 0.5
+
+        self.prompt_builder = BehavioralPromptBuilder()
+        self.validator = ResponseValidator()
 
         # Initialize or restore engines
         self._init_engines()
@@ -138,6 +169,11 @@ class CognitionPipeline:
         self.predictive_engine = PredictiveSimulationEngine(self._player_trust)
         self.summarizer = CognitiveSummarizer()
 
+    def _load_seed_memories(self) -> None:
+        """Load local seed memories for known demo NPCs."""
+        if "morgan" in self.npc_id.lower():
+            self.memory_store.load_all(MORGAN_MEMORIES)
+
     # ── MAIN TURN PROCESSING ──────────────────
 
     def process_turn(self, turn_input: TurnInput) -> TurnOutput:
@@ -145,6 +181,7 @@ class CognitionPipeline:
         Process a single conversation turn through the full cognitive pipeline.
         """
         start_time = time.time()
+        previous_player_trust = self._player_trust
         self._turn_count += 1
         self._player_trust = turn_input.player_trust_level
 
@@ -155,27 +192,77 @@ class CognitionPipeline:
             f"threat={turn_input.threat_level:.2f}"
         )
 
-        # ── STEP 1: Memory Retrieval ──────────
-        # Your existing ChromaDB system plugs in here
-        seed_nodes = self.memory_retriever(
-            npc_id=self.npc_id,
-            query=turn_input.player_message,
+        # ── STEP 1: Memory Retrieval + Activation + Spreading ──
+        prior_emotional_state = self.persistence_engine.get_modified_baseline(
+            self._last_emotional_state
         )
-        logger.debug(f"[Pipeline] Seed nodes: {list(seed_nodes.keys())}")
+        activation_emotional_state = emotional_state_to_activation_dict(
+            prior_emotional_state
+        )
 
-        # ── STEP 2: Spreading Activation ─────
-        # Your existing NetworkX spreading activation plugs in here
-        activated_nodes = self.activation_spreader(
-            seed_nodes=list(seed_nodes.keys()),
-            graph=None,  # pass your graph here
+        if self.memory_retriever:
+            memory_state = self.memory_retriever(
+                npc_id=self.npc_id,
+                query=turn_input.player_message,
+                emotional_state=activation_emotional_state,
+            )
+        else:
+            memory_state = self.retrieve_and_activate_memories(
+                query=turn_input.player_message,
+                emotional_state=activation_emotional_state,
+            )
+
+        retrieved = memory_state["retrieved"]
+        activated = memory_state["activated"]
+        spread = memory_state["spread"]
+
+        logger.debug(
+            f"[Pipeline] Retrieved memories: "
+            f"{[m[0] for m in retrieved]}"
         )
-        # Merge seed activation scores into full activated map
-        for node_id, score in seed_nodes.items():
-            activated_nodes[node_id] = max(activated_nodes.get(node_id, 0.0), score)
+
+        # Convert activated memories into provenance-rich node map.
+        activated_nodes = {}
+        for memory in activated:
+            activated_nodes[memory.memory_id] = {
+                "activation": memory.activation_score,
+                "source": "direct",
+                "parent": None,
+            }
+
+        # Add spread activation influence
+        for spread_result in spread:
+
+            target = spread_result.target_memory
+
+            spread_strength = spread_result.spread_strength
+
+            existing = activated_nodes.get(target)
+            if existing is None or spread_strength > existing["activation"]:
+                activated_nodes[target] = {
+                    "activation": spread_strength,
+                    "source": "spread",
+                    "parent": spread_result.source_memory,
+                }
+
+        activated_node_scores = activation_scores_from_provenance(
+            activated_nodes
+        )
+
+        suppression_state = self.suppression_engine.evaluate(
+            activated_memories=activated,
+            activated_nodes=activated_node_scores,
+        )
+        attention_activation_scores = (
+            self.suppression_engine.apply_attention_interception(
+                activated_nodes=activated_node_scores,
+                suppression_state=suppression_state,
+            )
+        )
 
         # ── STEP 3: Build Base Emotional State ─
         base_emotional_state = self._build_base_emotional_state(
-            activated_nodes=activated_nodes,
+            activated_nodes=activated_node_scores,
             node_emotion_tags=turn_input.node_emotion_tags,
         )
 
@@ -184,18 +271,44 @@ class CognitionPipeline:
         modified_emotional_state = self.persistence_engine.get_modified_baseline(
             base_emotional_state
         )
+        modified_emotional_state.readings.extend(
+            self.suppression_engine.build_leakage_readings(
+                suppression_state=suppression_state,
+                node_emotion_tags=turn_input.node_emotion_tags,
+            )
+        )
+        modified_emotional_state = recompute_emotional_state(
+            modified_emotional_state
+        )
 
         # ── STEP 5: Goal Arbitration ──────────
         goal_state = self.goal_engine.arbitrate(
             emotional_state=modified_emotional_state,
-            activated_node_ids=list(activated_nodes.keys()),
+            activated_node_ids=list(activated_node_scores.keys()),
             player_trust_level=self._player_trust,
             threat_level=turn_input.threat_level,
         )
+        goal_state.strategic_silence = list(
+            set(goal_state.strategic_silence + suppression_state.intercepted_nodes)
+        )
+        goal_state.concealment_pressure = max(
+            goal_state.concealment_pressure,
+            suppression_state.total_disclosure_inhibition,
+        )
+        goal_state.manipulation_intent = max(
+            goal_state.manipulation_intent,
+            suppression_state.total_deflection_pressure * 0.7,
+        )
+        if suppression_state.total_deflection_pressure > 0.45:
+            goal_state.disclosure_pressure = max(
+                0.0,
+                goal_state.disclosure_pressure
+                - suppression_state.total_deflection_pressure * 0.35,
+            )
 
         # ── STEP 6: Attention Filtering ───────
         attention_state = self.attention_engine.process(
-            activated_nodes=activated_nodes,
+            activated_nodes=attention_activation_scores,
             emotional_state=modified_emotional_state,
             goal_state=goal_state,
             node_emotion_tags=turn_input.node_emotion_tags,
@@ -203,7 +316,7 @@ class CognitionPipeline:
 
         # ── STEP 7: Self-Concept Defense ──────
         self_concept_state = self.self_concept.evaluate(
-            activated_nodes=activated_nodes,
+            activated_nodes=activated_node_scores,
             emotional_state=modified_emotional_state,
             goal_state=goal_state,
         )
@@ -231,18 +344,36 @@ class CognitionPipeline:
         )
 
         # ── STEP 10: Build LLM Prompt ─────────
-        prompt_block = self.summarizer.to_prompt_block(cognitive_summary, self.npc_name)
-        system_prompt = self._build_system_prompt(prompt_block)
+
+        prompt_block = self.summarizer.to_prompt_block(
+            cognitive_summary,
+            self.npc_name
+        )
+
+        acting_note = self.prompt_builder.build_acting_note(
+            cognitive_summary,
+            self.npc_name
+        )
+
+        system_instruction = (
+            f"{self.character_brief}\n\n"
+            f"{acting_note}"
+        )
 
         # ── STEP 11: LLM Call ─────────────────
         self._conversation_history.append({
             "role": "user",
             "content": turn_input.player_message
         })
-        npc_response = self.llm_caller(
-            system_prompt=system_prompt,
-            conversation_history=self._conversation_history,
+        npc_response = self.llm_client.generate_response(
+            prompt=prompt_block,
+            system_instruction=system_instruction,
+            history=self._conversation_history,
         )
+
+        # ── STEP 11.5: Validate ───────────────
+        self.validator.validate(npc_response, cognitive_summary)
+
         self._conversation_history.append({
             "role": "assistant",
             "content": npc_response
@@ -255,8 +386,10 @@ class CognitionPipeline:
             chosen_strategy=predictive_state.chosen_strategy,
             goal_state=goal_state,
             trust_level=self._player_trust,
+            previous_trust_level=previous_player_trust,
             threat_level=turn_input.threat_level,
         )
+        self._focal_history.append(list(attention_state.focal_nodes))
 
         # ── STEP 13: Persist State ────────────
         self.state_store.save(
@@ -267,6 +400,8 @@ class CognitionPipeline:
             player_trust=self._player_trust,
             turn_count=self._turn_count,
         )
+
+        self._last_emotional_state = modified_emotional_state
 
         # ── ASSEMBLE OUTPUT ───────────────────
         processing_ms = (time.time() - start_time) * 1000
@@ -288,8 +423,39 @@ class CognitionPipeline:
             prompt_block=prompt_block,
             activated_nodes=activated_nodes,
             cognitive_summary_text=prompt_block,
+            cognitive_summary=cognitive_summary,
+            retrieved_memories=retrieved,
+            activated_memories=activated,
+            spread_results=spread,
+            suppression_results=suppression_state.results,
+            attention_activation_scores=attention_activation_scores,
+            activation_emotional_state=activation_emotional_state,
             processing_time_ms=processing_ms,
         )
+
+    def retrieve_and_activate_memories(
+        self,
+        query: str,
+        emotional_state: dict,
+    ) -> dict:
+        """
+        Run semantic retrieval, emotional activation, and spreading activation
+        using the pipeline-owned runtime engines.
+        """
+        retrieved = self.memory_store.semantic_search(query)
+
+        activated = self.activation_engine.compute_activation(
+            retrieved,
+            emotional_state,
+        )
+
+        spread_results = self.spreading_engine.spread(activated)
+
+        return {
+            "retrieved": retrieved,
+            "activated": activated,
+            "spread": spread_results,
+        }
 
     # ── POST-TURN UPDATES ─────────────────────
 
@@ -300,6 +466,7 @@ class CognitionPipeline:
         chosen_strategy: str,
         goal_state,
         trust_level: float,
+        previous_trust_level: float,
         threat_level: float,
     ) -> None:
         """
@@ -315,8 +482,8 @@ class CognitionPipeline:
         )
 
         # Goal engine runtime updates
-        if trust_level > self._player_trust:
-            self.goal_engine.on_trust_gained(trust_level - self._player_trust)
+        if trust_level > previous_trust_level:
+            self.goal_engine.on_trust_gained(trust_level - previous_trust_level)
         if threat_level > 0.3:
             self.goal_engine.on_threat_detected(threat_level)
 
@@ -334,12 +501,23 @@ class CognitionPipeline:
         readings = []
         emotion_totals: dict[str, float] = {}
 
+        # Habituation: Nodes that have been focal recently lose some emotional impact
+        # This prevents "trauma fixation" loops.
+        recent_focal_counts = {}
+        for turn_focal in self._focal_history[-5:]:
+            for node_id in turn_focal:
+                recent_focal_counts[node_id] = recent_focal_counts.get(node_id, 0) + 1
+
         for node_id, activation in activated_nodes.items():
             if activation < 0.1:
                 continue
+            
+            habituation = max(0.4, 1.0 - (recent_focal_counts.get(node_id, 0) * 0.15))
             tags = node_emotion_tags.get(node_id, [])
+            effective_activation = activation * habituation
+            
             for tag in tags:
-                emotion_totals[tag] = emotion_totals.get(tag, 0.0) + activation
+                emotion_totals[tag] = emotion_totals.get(tag, 0.0) + effective_activation
 
         for emotion_label, total in emotion_totals.items():
             try:
@@ -394,51 +572,105 @@ Speak. Let the internal state shape the voice, the deflections, the silences.
 
 
 # ─────────────────────────────────────────────
-# STUB IMPLEMENTATIONS
-# Replace these with your actual ChromaDB / NetworkX systems
+# RUNTIME ADAPTERS
 # ─────────────────────────────────────────────
-
-def _stub_memory_retriever(npc_id: str, query: str) -> dict[str, float]:
+def emotional_state_to_activation_dict(
+    emotional_state: EmotionalState,
+) -> dict[str, float]:
     """
-    Stub: Replace with ChromaDB semantic retrieval.
-    Returns: node_id -> relevance_score
+    Convert pipeline EmotionalState into ActivationEngine's compact affect dict.
     """
-    logger.warning("[Pipeline] Using stub memory retriever — replace with ChromaDB")
-    # Example stub returns for Morgan
-    if "kara" in query.lower():
-        return {
-            "childhood_with_kara": 0.85,
-            "last_good_night": 0.7,
-            "karas_body": 0.6,
-        }
-    elif "night" in query.lower() or "happened" in query.lower():
-        return {
-            "the_night_it_happened": 0.9,
-            "river_location": 0.7,
-        }
-    return {}
-
-
-def _stub_activation_spreader(seed_nodes: list[str], graph) -> dict[str, float]:
-    """
-    Stub: Replace with NetworkX spreading activation.
-    Returns: node_id -> activation_score
-    """
-    logger.warning("[Pipeline] Using stub activation spreader — replace with NetworkX")
-    activated = {}
-    # Simple stub: seed nodes activate neighbors (hardcoded for demo)
-    neighbor_map = {
-        "childhood_with_kara": ["last_good_night", "self_as_protector", "connection_memory"],
-        "karas_body":          ["river_location", "the_night_it_happened", "helplessness_memory"],
-        "the_night_it_happened": ["karas_body", "the_knife", "helplessness_memory", "crying_alone"],
-        "river_location":      ["karas_body", "the_night_it_happened"],
-        "last_good_night":     ["childhood_with_kara", "grief_for_kara"],
+    affect = {
+        "sadness": 0.0,
+        "fear": 0.0,
+        "anger": 0.0,
     }
-    for node in seed_nodes:
-        activated[node] = 1.0
-        for neighbor in neighbor_map.get(node, []):
-            activated[neighbor] = max(activated.get(neighbor, 0.0), 0.55)
-    return activated
+
+    for reading in emotional_state.readings + emotional_state.residue:
+        intensity = max(0.0, min(1.0, reading.intensity))
+
+        if reading.emotion in (
+            EmotionType.GRIEF,
+            EmotionType.LONGING,
+            EmotionType.NUMBNESS,
+        ):
+            affect["sadness"] = max(affect["sadness"], intensity)
+        elif reading.emotion in (EmotionType.FEAR, EmotionType.DREAD):
+            affect["fear"] = max(affect["fear"], intensity)
+        elif reading.emotion in (EmotionType.ANGER, EmotionType.CONTEMPT):
+            affect["anger"] = max(affect["anger"], intensity)
+        elif reading.emotion in (EmotionType.SHAME, EmotionType.GUILT):
+            affect["sadness"] = max(affect["sadness"], intensity * 0.6)
+            affect["fear"] = max(affect["fear"], intensity * 0.4)
+
+    if emotional_state.valence < -0.2:
+        affect["sadness"] = max(
+            affect["sadness"],
+            min(1.0, abs(emotional_state.valence) * 0.4),
+        )
+
+    if emotional_state.arousal > 0.4:
+        affect["fear"] = max(
+            affect["fear"],
+            min(1.0, emotional_state.arousal * 0.5),
+        )
+
+    return affect
+
+
+def activation_scores_from_provenance(
+    activated_nodes: dict[str, dict],
+) -> dict[str, float]:
+    """Extract node scores for engines that still consume flat activations."""
+    return {
+        node_id: data["activation"]
+        for node_id, data in activated_nodes.items()
+    }
+
+
+def recompute_emotional_state(
+    emotional_state: EmotionalState,
+) -> EmotionalState:
+    """Refresh dominant emotion, valence, and arousal after adding readings."""
+    if not emotional_state.readings:
+        emotional_state.dominant = None
+        emotional_state.valence = 0.0
+        emotional_state.arousal = 0.0
+        return emotional_state
+
+    negative_emotions = {
+        EmotionType.FEAR,
+        EmotionType.GRIEF,
+        EmotionType.SHAME,
+        EmotionType.GUILT,
+        EmotionType.ANGER,
+        EmotionType.DREAD,
+        EmotionType.NUMBNESS,
+    }
+    emotional_state.dominant = max(
+        emotional_state.readings,
+        key=lambda reading: reading.intensity,
+    )
+    total_intensity = sum(reading.intensity for reading in emotional_state.readings)
+    if total_intensity <= 0:
+        emotional_state.valence = 0.0
+        emotional_state.arousal = 0.0
+        return emotional_state
+
+    negative_intensity = sum(
+        reading.intensity
+        for reading in emotional_state.readings
+        if reading.emotion in negative_emotions
+    )
+    positive_intensity = total_intensity - negative_intensity
+    emotional_state.valence = (
+        positive_intensity - negative_intensity
+    ) / total_intensity
+    emotional_state.arousal = min(
+        1.0,
+        total_intensity / len(emotional_state.readings),
+    )
+    return emotional_state
 
 
 def _default_llm_caller(system_prompt: str, conversation_history: list[dict]) -> str:
