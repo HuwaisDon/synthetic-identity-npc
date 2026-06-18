@@ -77,7 +77,7 @@ def _build_pipeline(npc_id: str) -> CognitionPipeline:
         npc_name=_npc_name_from_id(npc_id),
         character_brief=character_brief,
         state_store=_state_store,
-        llm_caller=_build_llm_caller(),
+        llm_client=_CallableLLMClient(_build_llm_caller()),
     )
 
 
@@ -109,6 +109,25 @@ def _build_llm_caller():
 
 def _npc_name_from_id(npc_id: str) -> str:
     return npc_id.split("_")[0].capitalize()
+
+
+class _CallableLLMClient:
+    """Adapts legacy callable LLM hooks to the pipeline client interface."""
+
+    def __init__(self, caller):
+        self._caller = caller
+
+    def generate_response(
+        self,
+        prompt: str | None = None,
+        acting_note: str | None = None,
+        system_instruction: str | None = None,
+        history: list | None = None,
+    ) -> str:
+        system_prompt = "\n\n".join(
+            part for part in (system_instruction, prompt or acting_note) if part
+        )
+        return self._caller(system_prompt, history or [])
 
 
 # ─────────────────────────────────────────────

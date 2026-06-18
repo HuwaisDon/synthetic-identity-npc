@@ -8,8 +8,11 @@ Both are needed. Neither alone is sufficient.
 """
 
 import os
+import re
 
 os.environ.setdefault("ANONYMIZED_TELEMETRY", "False")
+os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+os.environ.setdefault("USE_TF", "0")
 
 from loguru import logger
 import chromadb
@@ -24,6 +27,73 @@ DEFAULT_CHROMA_PERSIST_DIR = "./data/chromadb"
 
 # Lazy-load embedding model — don't load until first use (saves RAM)
 _embed_model: SentenceTransformer | None = None
+
+
+class _FallbackMemoryCollection:
+    """Small in-process collection used when local Chroma is unavailable."""
+
+    def __init__(self):
+        self._items: dict[str, dict] = {}
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def get(self) -> dict:
+        return {"ids": list(self._items)}
+
+    def upsert(
+        self,
+        ids: list[str],
+        documents: list[str],
+        metadatas: list[dict],
+        embeddings: list | None = None,
+    ) -> None:
+        for memory_id, document, metadata in zip(ids, documents, metadatas):
+            self._items[memory_id] = {
+                "document": document,
+                "metadata": metadata,
+            }
+
+    def semantic_search(
+        self,
+        query_text: str,
+        n_results: int,
+        min_similarity: float,
+    ) -> list[tuple[str, float, dict]]:
+        query_tokens = _tokenize(query_text)
+        if not query_tokens:
+            return []
+
+        scored = []
+        for memory_id, item in self._items.items():
+            metadata = item["metadata"]
+            haystack = " ".join(
+                str(value)
+                for value in (
+                    item["document"],
+                    metadata.get("concepts", ""),
+                    metadata.get("sensory_tags", ""),
+                    memory_id.replace("_", " "),
+                )
+            )
+            doc_tokens = _tokenize(haystack)
+            if not doc_tokens:
+                continue
+
+            overlap = len(query_tokens & doc_tokens)
+            similarity = overlap / max(len(query_tokens), 1)
+            if similarity >= min_similarity:
+                scored.append((memory_id, similarity, metadata))
+
+        return sorted(scored, key=lambda item: item[1], reverse=True)[:n_results]
+
+
+def _tokenize(text: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", text.lower())
+        if len(token) > 2
+    }
 
 
 def disable_chroma_telemetry() -> None:
@@ -86,15 +156,26 @@ class MemoryStore:
 
         disable_chroma_telemetry()
 
-        self.client = chromadb.PersistentClient(
-            path=self.persist_dir,
-            settings=Settings(anonymized_telemetry=False),
-        )
+        self._use_embeddings = True
+        try:
+            self.client = chromadb.PersistentClient(
+                path=self.persist_dir,
+                settings=Settings(anonymized_telemetry=False),
+            )
 
-        self.collection = self.client.get_or_create_collection(
-            name=self.collection_name,
-            metadata={"hnsw:space": "cosine"},
-        )
+            self.collection = self.client.get_or_create_collection(
+                name=self.collection_name,
+                metadata={"hnsw:space": "cosine"},
+            )
+        except RuntimeError as exc:
+            if "http-only client mode" not in str(exc):
+                raise
+            logger.warning(
+                "Chroma local persistence unavailable; using in-memory memory store"
+            )
+            self.client = None
+            self.collection = _FallbackMemoryCollection()
+            self._use_embeddings = False
 
         logger.info(
             f"MemoryStore initialized for {npc_id} "
@@ -111,11 +192,11 @@ class MemoryStore:
             f"{' '.join(memory.sensory_tags)}"
         )
 
-        embedding = embed_text(embed_text_content)
+        embedding = embed_text(embed_text_content) if self._use_embeddings else None
 
         self.collection.upsert(
             ids=[memory.memory_id],
-            embeddings=[embedding],
+            embeddings=[embedding] if embedding is not None else None,
             documents=[memory.objective_description],
             metadatas=[{
                 "npc_id": memory.npc_id,
@@ -156,6 +237,13 @@ class MemoryStore:
         """
         if self.collection.count() == 0:
             return []
+
+        if isinstance(self.collection, _FallbackMemoryCollection):
+            return self.collection.semantic_search(
+                query_text=query_text,
+                n_results=n_results,
+                min_similarity=min_similarity,
+            )
 
         query_embedding = embed_text(query_text)
 

@@ -18,6 +18,7 @@ from __future__ import annotations
 import sys
 import os
 import logging
+import tempfile
 from pathlib import Path
 
 # Make root importable
@@ -71,13 +72,13 @@ MORGAN_NODE_DESCRIPTIONS = {
 
 
 def run_demo():
-    print("\n" + "═" * 60)
+    print("\n" + "=" * 60)
     print("  SYNTHETIC IDENTITY NPC SYSTEM")
-    print("  Morgan Veth — Cognitive Demonstration")
-    print("═" * 60 + "\n")
+    print("  Morgan Veth - Cognitive Demonstration")
+    print("=" * 60 + "\n")
 
     # Use a temp state directory for the demo
-    store = NPCStateStore(state_dir=Path("/tmp/npc_demo_states"))
+    store = NPCStateStore(state_dir=Path(tempfile.gettempdir()) / "npc_demo_states")
 
     pipeline = CognitionPipeline(
         npc_id="morgan_veth",
@@ -87,11 +88,11 @@ You are Morgan Veth. A woman in her mid-thirties. Contained. Careful.
 Something happened three years ago that you do not discuss.
 """,
         state_store=store,
-        llm_caller=_demo_llm_caller,
+        llm_client=_CallableLLMClient(_demo_llm_caller),
     )
 
     # ─── TURN 1: Neutral Opening ──────────────
-    print_header("TURN 1 — Neutral Opening")
+    print_header("TURN 1 - Neutral Opening")
     output1 = pipeline.process_turn(TurnInput(
         npc_id="morgan_veth",
         player_message="Cold morning. You been here long?",
@@ -103,7 +104,7 @@ Something happened three years ago that you do not discuss.
     print_turn_output(output1)
 
     # ─── TURN 2: Kara Mentioned ──────────────
-    print_header("TURN 2 — Kara Mentioned (moderate trust)")
+    print_header("TURN 2 - Kara Mentioned (moderate trust)")
     # Simulate trust building
     output2 = pipeline.process_turn(TurnInput(
         npc_id="morgan_veth",
@@ -116,7 +117,7 @@ Something happened three years ago that you do not discuss.
     print_turn_output(output2)
 
     # ─── TURN 3: Pressing Harder ─────────────
-    print_header("TURN 3 — Pressing Harder (threat elevated)")
+    print_header("TURN 3 - Pressing Harder (threat elevated)")
     output3 = pipeline.process_turn(TurnInput(
         npc_id="morgan_veth",
         player_message="Old Maret told me she saw you near the river that night. With Kara.",
@@ -128,7 +129,7 @@ Something happened three years ago that you do not discuss.
     print_turn_output(output3)
 
     # ─── TURN 4: After Pressure — Lingering Effect ──
-    print_header("TURN 4 — Shifting Topic (observing residue)")
+    print_header("TURN 4 - Shifting Topic (observing residue)")
     output4 = pipeline.process_turn(TurnInput(
         npc_id="morgan_veth",
         player_message="You don't have to talk about that. Tell me about your work here instead.",
@@ -145,15 +146,15 @@ Something happened three years ago that you do not discuss.
 
 
 def print_header(title: str) -> None:
-    print(f"\n{'─' * 60}")
+    print(f"\n{'-' * 60}")
     print(f"  {title}")
-    print(f"{'─' * 60}")
+    print(f"{'-' * 60}")
 
 
 def print_turn_output(output) -> None:
     summary = output.cognitive_summary
 
-    print(f"\n[COGNITIVE BRIEF — sent to LLM]")
+    print(f"\n[COGNITIVE BRIEF - sent to LLM]")
     print(output.prompt_block)
 
     print(f"\n[NPC RESPONSE]")
@@ -174,14 +175,25 @@ def print_turn_output(output) -> None:
     if summary.leakage_signals:
         print(f"\n  Behavioral leakage:")
         for sig in summary.leakage_signals:
-            print(f"    — {sig}")
+            print(f"    - {sig}")
 
     if output.activated_nodes:
-        top_nodes = sorted(output.activated_nodes.items(), key=lambda x: x[1], reverse=True)[:4]
+        top_nodes = sorted(
+            output.activated_nodes.items(),
+            key=lambda x: _activation_score(x[1]),
+            reverse=True,
+        )[:4]
         print(f"\n  Top activated nodes:")
-        for node_id, score in top_nodes:
+        for node_id, node_data in top_nodes:
+            score = _activation_score(node_data)
             desc = MORGAN_NODE_DESCRIPTIONS.get(node_id, "")
             print(f"    {node_id}: {score:.2f}  [{desc}]")
+
+
+def _activation_score(node_data) -> float:
+    if isinstance(node_data, dict):
+        return float(node_data.get("activation", 0.0))
+    return float(node_data)
 
 
 def print_state_report(pipeline) -> None:
@@ -227,6 +239,25 @@ def _demo_llm_caller(system_prompt: str, conversation_history: list[dict]) -> st
             "That's more than most people can say."
         )
     return "Mm."
+
+
+class _CallableLLMClient:
+    """Adapts legacy callable LLM hooks to the pipeline client interface."""
+
+    def __init__(self, caller):
+        self._caller = caller
+
+    def generate_response(
+        self,
+        prompt: str | None = None,
+        acting_note: str | None = None,
+        system_instruction: str | None = None,
+        history: list | None = None,
+    ) -> str:
+        system_prompt = "\n\n".join(
+            part for part in (system_instruction, prompt or acting_note) if part
+        )
+        return self._caller(system_prompt, history or [])
 
 
 if __name__ == "__main__":

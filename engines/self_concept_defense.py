@@ -162,8 +162,8 @@ class SelfConceptDefenseSystem:
                 active_threats.append(threat)
                 if threat.defense_mechanism not in active_defenses:
                     active_defenses.append(threat.defense_mechanism)
-                claim = self.identity_claims[threat.threatening_node.count("_") % len(self.identity_claims)]
-                if claim not in threatened_claims:
+                claim = self._identity_claim_for_threat(threat)
+                if claim and claim not in threatened_claims:
                     threatened_claims.append(claim)
 
         # Coherence: degrades with high-intensity threats
@@ -221,6 +221,7 @@ class SelfConceptDefenseSystem:
 
                 threat = SelfConceptThreat(
                     threatening_node=node_id,
+                    claim_idx=claim_idx,
                     threat_type=threat_type,
                     threat_intensity=threat_intensity,
                     defense_mechanism=defense,
@@ -229,6 +230,21 @@ class SelfConceptDefenseSystem:
                 threats.append(threat)
 
         return threats
+
+    def _identity_claim_for_threat(
+        self,
+        threat: SelfConceptThreat,
+    ) -> Optional[str]:
+        """Return the authored identity claim for a detected threat."""
+        if 0 <= threat.claim_idx < len(self.identity_claims):
+            return self.identity_claims[threat.claim_idx]
+
+        logger.warning(
+            "[SelfConcept] threat %s has invalid claim_idx=%s",
+            threat.threatening_node,
+            threat.claim_idx,
+        )
+        return None
 
     def _select_reframe(self, threat_type: str) -> Optional[str]:
         """Select the most appropriate reframe narrative for this threat type."""

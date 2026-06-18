@@ -19,9 +19,15 @@ class GeminiClient:
             "gemini-2.5-flash"
         )
 
-        self.client = genai.Client(
-            api_key=self.api_key
-        )
+        if not self.api_key:
+            self.client = None
+            logger.warning(
+                "[Gemini] GEMINI_API_KEY not set; using fallback responses"
+            )
+        else:
+            self.client = genai.Client(
+                api_key=self.api_key
+            )
 
     def generate_response(
         self,
@@ -34,6 +40,13 @@ class GeminiClient:
         start_time = time.time()
 
         prompt = prompt or acting_note or ""
+
+        if self.client is None:
+            logger.warning("[Gemini] No client configured; returning fallback")
+            return (
+                "... Morgan looks away for a long moment, "
+                "jaw tight, unable to answer directly ..."
+            )
 
         conversation = ""
 

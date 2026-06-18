@@ -195,6 +195,7 @@ class SelfConceptThreat:
       and what mechanism was deployed.
     """
     threatening_node: str           # memory node that threatens self-concept
+    claim_idx: int                  # index of the identity claim being defended
     threat_type: str                # "shame", "helplessness", "moral_failure", "betrayal"
     threat_intensity: float
     defense_mechanism: str          # "reframe", "externalize_blame", "minimize", "mythologize", "deny"
