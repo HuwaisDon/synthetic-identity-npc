@@ -40,6 +40,7 @@ from schemas.cognitive_schemas import (
     GoalState, AttentionState, AttentionalState,
     SelfConceptState, PredictiveState, EmotionalPersistenceState
 )
+from schemas.intention_schema import Intention
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,7 @@ class CognitiveSummarizer:
         predictive_state: PredictiveState,
         persistence_state: EmotionalPersistenceState,
         node_descriptions: Optional[dict[str, str]] = None,  # node_id -> brief description
+        intention: Optional[Intention] = None,
     ) -> CognitiveSummary:
         """
         Produce a CognitiveSummary that captures behavioral pressure without
@@ -168,6 +170,8 @@ class CognitiveSummarizer:
         summary.response_style = STRATEGY_TO_RESPONSE_STYLE.get(
             predictive_state.chosen_strategy, "direct"
         )
+        if intention is not None:
+            summary.strategic_intent = f"{intention.disposition}::{intention.dominant_drive.value if intention.dominant_drive else 'neutral'}"
 
         # ── BEHAVIORAL LEAKAGE ───────────────
 

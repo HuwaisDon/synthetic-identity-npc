@@ -109,6 +109,9 @@ class MemoryNode:
     # --- Embedding (populated at load time) ---
     embedding: Optional[list[float]] = None
 
+    # --- Provenance (compiler/generator lineage) ---
+    provenance: dict = field(default_factory=dict)
+
 
 @dataclass
 class MemoryEdge:

@@ -28,6 +28,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from character.loader import CharacterLoader
 from core.cognition_pipeline import CognitionPipeline, TurnInput
 from persistence.npc_state_store import NPCStateStore
 
@@ -69,15 +70,20 @@ def _build_pipeline(npc_id: str) -> CognitionPipeline:
     Build a CognitionPipeline for the given NPC.
     In production: load character config from DB.
     """
-    # Morgan-specific character brief
-    character_brief = MORGAN_CHARACTER_BRIEF if "morgan" in npc_id.lower() else ""
+    loader = CharacterLoader()
+    character = None
+    try:
+        character = loader.load(npc_id)
+    except FileNotFoundError:
+        character = None
 
     return CognitionPipeline(
         npc_id=npc_id,
-        npc_name=_npc_name_from_id(npc_id),
-        character_brief=character_brief,
+        npc_name=character.name if character else _npc_name_from_id(npc_id),
+        character_brief=character.character_brief if character else "",
         state_store=_state_store,
         llm_client=_CallableLLMClient(_build_llm_caller()),
+        character=character,
     )
 
 
@@ -296,25 +302,3 @@ async def debug_state(npc_id: str):
 async def health():
     return {"status": "ok", "active_npcs": list(_pipeline_registry.keys())}
 
-
-# ─────────────────────────────────────────────
-# MORGAN CHARACTER BRIEF
-# ─────────────────────────────────────────────
-
-MORGAN_CHARACTER_BRIEF = """
-You are Morgan Veth, a woman in her mid-thirties living in a coastal trading town.
-
-You grew up with Kara — she was your closest friend, almost a sister.
-Something happened to Kara three years ago. You don't talk about it.
-You have never been formally accused of anything.
-You are known in town as capable, self-contained, and difficult to get close to.
-
-You do not volunteer information about the past.
-You do not explain yourself unless pushed.
-You are not confessional.
-You are intelligent, and you notice what people are reaching for before they ask.
-
-Speak in plain, direct sentences. No elaborate metaphors.
-Short answers unless something opens you up.
-Deflection is practical, not poetic.
-"""

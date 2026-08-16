@@ -37,7 +37,9 @@ from schemas.cognitive_schemas import (
     EmotionalState, EmotionalReading, EmotionType,
     NPCCognitiveState,CognitiveSummary,
 )
-from engines.goal_engine import GoalEngine, build_morgan_goal_profile
+from schemas.character_schema import CharacterSchema, GoalTemplate, ThreatRule
+from schemas.intention_schema import Intention
+from engines.goal_engine import GoalEngine, build_goal_profile
 from engines.attention_engine import AttentionEngine
 from engines.emotional_persistence import EmotionalPersistenceEngine
 from engines.self_concept_defense import SelfConceptDefenseSystem
@@ -54,7 +56,7 @@ from persistence.npc_state_store import NPCStateStore
 from memory.memory_store import MemoryStore
 from memory.activation import ActivationEngine
 from memory.spreading import SpreadingActivationEngine
-from memory.morgan_memories import MORGAN_MEMORIES
+from character.loader import CharacterLoader
 
 logger = logging.getLogger(__name__)
 
@@ -108,16 +110,18 @@ class CognitionPipeline:
     def __init__(
         self,
         npc_id: str,
-        npc_name: str = "Morgan",
+        npc_name: str = "NPC",
         character_brief: str = "",
         state_store: Optional[NPCStateStore] = None,
         llm_client = None,
         memory_retriever = None,   # callable: (str, str) -> dict[str, float]
         activation_spreader = None,  # callable: (list[str], dict) -> dict[str, float]
+        character: Optional[CharacterSchema] = None,
     ):
         self.npc_id = npc_id
         self.npc_name = npc_name
         self.character_brief = character_brief
+        self.character = character
         self.state_store = state_store or NPCStateStore()
         self.llm_client = llm_client or GeminiClient()
         # self.llm_client = OpenRouterClient()
@@ -127,6 +131,7 @@ class CognitionPipeline:
         self.activation_engine = ActivationEngine()
         self.spreading_engine = SpreadingActivationEngine()
         self.suppression_engine = SuppressionEngine()
+        self._load_character_definition()
         self._load_seed_memories()
         self._last_emotional_state = EmotionalState()
         
@@ -160,9 +165,13 @@ class CognitionPipeline:
             )
         else:
             # Fresh NPC
-            self.goal_engine = GoalEngine(build_morgan_goal_profile())
+            initial_goals = build_goal_profile(self.character)
+            self.goal_engine = GoalEngine(initial_goals)
             self.persistence_engine = EmotionalPersistenceEngine()
-            self.self_concept = SelfConceptDefenseSystem()
+            self.self_concept = SelfConceptDefenseSystem(
+                identity_claims=(self.character.identity_claims() if self.character else None),
+                threat_rules=(self.character.threat_rules if self.character else None),
+            )
             logger.info(f"[Pipeline] New NPC initialized: {self.npc_id}")
 
         self.attention_engine = AttentionEngine()
@@ -171,8 +180,16 @@ class CognitionPipeline:
 
     def _load_seed_memories(self) -> None:
         """Load local seed memories for known demo NPCs."""
-        if "morgan" in self.npc_id.lower():
-            self.memory_store.load_all(MORGAN_MEMORIES)
+        if self.character and self.character.memories:
+            self.memory_store.load_all(self.character.memories)
+
+    def _load_character_definition(self) -> None:
+        if self.character is None:
+            loader = CharacterLoader()
+            try:
+                self.character = loader.load(self.npc_id)
+            except FileNotFoundError:
+                self.character = None
 
     # ── MAIN TURN PROCESSING ──────────────────
 
@@ -333,6 +350,7 @@ class CognitionPipeline:
         )
 
         # ── STEP 9: Cognitive Summarization ───
+        intention = build_intention(goal_state, predictive_state)
         cognitive_summary = self.summarizer.summarize(
             emotional_state=modified_emotional_state,
             goal_state=goal_state,
@@ -341,6 +359,7 @@ class CognitionPipeline:
             predictive_state=predictive_state,
             persistence_state=self.persistence_engine.state,
             node_descriptions=turn_input.node_descriptions,
+            intention=intention,
         )
 
         # ── STEP 10: Build LLM Prompt ─────────
@@ -360,7 +379,7 @@ class CognitionPipeline:
             f"{acting_note}"
         )
 
-        # ── STEP 11: LLM Call ─────────────────
+        # ── STEP 12: LLM Call ─────────────────
         self._conversation_history.append({
             "role": "user",
             "content": turn_input.player_message
@@ -371,7 +390,7 @@ class CognitionPipeline:
             history=self._conversation_history,
         )
 
-        # ── STEP 11.5: Validate ───────────────
+        # ── STEP 12.5: Validate ───────────────
         self.validator.validate(npc_response, cognitive_summary)
 
         self._conversation_history.append({
@@ -379,7 +398,7 @@ class CognitionPipeline:
             "content": npc_response
         })
 
-        # ── STEP 12: Post-Turn State Updates ──
+        # ── STEP 13: Post-Turn State Updates ──
         self._post_turn_updates(
             emotional_readings=modified_emotional_state.readings,
             focal_nodes=attention_state.focal_nodes,
@@ -391,7 +410,7 @@ class CognitionPipeline:
         )
         self._focal_history.append(list(attention_state.focal_nodes))
 
-        # ── STEP 13: Persist State ────────────
+        # ── STEP 14: Persist State ────────────
         self.state_store.save(
             npc_id=self.npc_id,
             goal_engine=self.goal_engine,
@@ -412,7 +431,7 @@ class CognitionPipeline:
             emotional_state=modified_emotional_state,
             goal_state=goal_state,
             attention_state=attention_state,
-            self_concept_state=self_concept_state,
+            self_concept_state=self.self_concept.state,
             predictive_state=predictive_state,
             cognitive_summary=cognitive_summary,
         )
@@ -569,6 +588,19 @@ Speak. Let the internal state shape the voice, the deflections, the silences.
     def reset_conversation(self) -> None:
         """Clear conversation history without resetting cognitive state."""
         self._conversation_history = []
+
+
+def build_intention(goal_state, predictive_state) -> Intention:
+    disposition = predictive_state.chosen_strategy if predictive_state.chosen_strategy else "neutral"
+    dominant_drive = None
+    if goal_state.dominant_goal and goal_state.dominant_goal.goal_type:
+        dominant_drive = goal_state.dominant_goal.goal_type
+    return Intention(
+        dominant_drive=dominant_drive,
+        disposition=disposition,
+        intensity=max(0.0, min(1.0, 0.4 + (goal_state.concealment_pressure * 0.4) + (goal_state.disclosure_pressure * 0.2))),
+        target_topics=list(goal_state.strategic_silence)[:4],
+    )
 
 
 # ─────────────────────────────────────────────

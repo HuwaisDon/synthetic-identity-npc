@@ -1,0 +1,110 @@
+{
+  "version": "1.0.0",
+  "npc_id": "morgan",
+  "saved_at": 1785758727.0639942,
+  "turn_count": 4,
+  "player_trust": 0.6,
+  "goal_engine": {
+    "goals": [
+      {
+        "goal_id": "g_survival",
+        "goal_type": "survival",
+        "description": "Avoid physical harm, imprisonment, or death.",
+        "utility": 0.95,
+        "urgency": 0.7,
+        "active": true,
+        "blocking_topics": [
+          "the_night_it_happened",
+          "karas_body",
+          "river_location"
+        ],
+        "linked_memory_nodes": []
+      },
+      {
+        "goal_id": "g_identity",
+        "goal_type": "identity",
+        "description": "Preserve self-image as a survivor who made hard choices, not a villain.",
+        "utility": 0.85,
+        "urgency": 0.4,
+        "active": true,
+        "blocking_topics": [
+          "helplessness_memory",
+          "begging_scene",
+          "crying_alone"
+        ],
+        "linked_memory_nodes": [
+          "self_as_survivor",
+          "self_as_protector"
+        ]
+      },
+      {
+        "goal_id": "g_concealment_primary",
+        "goal_type": "concealment",
+        "description": "The event must never be fully described to anyone.",
+        "utility": 0.9,
+        "urgency": 0.8,
+        "active": true,
+        "blocking_topics": [
+          "the_night_it_happened",
+          "karas_body",
+          "river_location",
+          "witness_old_maret",
+          "the_knife"
+        ],
+        "linked_memory_nodes": []
+      }
+    ],
+    "turn_count": 4
+  },
+  "persistence_engine": {
+    "residue": [
+      {
+        "emotion": "dread",
+        "intensity": 0.46881093881716296,
+        "source_description": "turn_4",
+        "source_node": "mem_005",
+        "turns_remaining": 3,
+        "decay_rate": 0.09
+      },
+      {
+        "emotion": "dread",
+        "intensity": 0.4400364615019907,
+        "source_description": "turn_4",
+        "source_node": "mem_006",
+        "turns_remaining": 3,
+        "decay_rate": 0.09
+      }
+    ],
+    "mood_baseline_shift": -0.05830924937832249,
+    "rumination_node": null,
+    "rumination_intensity": 0.0,
+    "turn_count": 4,
+    "focal_history": [
+      [
+        "mem_002",
+        "mem_003",
+        "mem_005"
+      ],
+      [],
+      [],
+      [
+        "mem_002",
+        "mem_003",
+        "mem_005"
+      ]
+    ]
+  },
+  "self_concept": {
+    "coherence": 1.0,
+    "core_identity_claims": [
+      "I am a survivor who made the only choices available to me.",
+      "I protected myself because no one else would.",
+      "I am not responsible for what happened to Kara \u2014 she made her own choices.",
+      "I am capable of love, even if I have done terrible things.",
+      "I am still a good person at my core.",
+      "What happened was necessary, not monstrous."
+    ],
+    "turn_count": 4
+  },
+  "extra": {}
+}

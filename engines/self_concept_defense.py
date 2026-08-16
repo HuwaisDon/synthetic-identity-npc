@@ -35,77 +35,14 @@ Architecture note:
 
 from __future__ import annotations
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from schemas.cognitive_schemas import (
     SelfConceptState, SelfConceptThreat, EmotionalState, EmotionType, GoalState
 )
+from schemas.character_schema import ThreatRule
 
 logger = logging.getLogger(__name__)
-
-
-# ─────────────────────────────────────────────
-# MORGAN'S CORE IDENTITY CLAIMS
-# These are what her self-concept REQUIRES to be true.
-# Threats to these claims activate the defense system.
-# ─────────────────────────────────────────────
-
-MORGAN_IDENTITY_CLAIMS = [
-    "I am a survivor who made the only choices available to me.",
-    "I protected myself because no one else would.",
-    "I am not responsible for what happened to Kara — she made her own choices.",
-    "I am capable of love, even if I have done terrible things.",
-    "I am still a good person at my core.",
-    "What happened was necessary, not monstrous.",
-]
-
-# Map: memory node patterns that threaten specific identity claims
-# Each entry: (node_id_pattern, threatened_claim_index, threat_type, defense)
-THREAT_MAP = [
-    ("helplessness_memory",  1, "helplessness",    "reframe"),
-    ("begging_scene",        0, "helplessness",    "minimize"),
-    ("crying_alone",         0, "helplessness",    "externalize_blame"),
-    ("karas_body",           2, "moral_failure",   "mythologize"),
-    ("river_location",       5, "moral_failure",   "deny"),
-    ("the_knife",            5, "moral_failure",   "intellectualize"),
-    ("the_night_it_happened",4, "moral_failure",   "reframe"),
-    ("witness_old_maret",    2, "shame",           "minimize"),
-    ("last_good_night",      3, "grief_for_self",  "reframe"),
-    ("childhood_with_kara",  3, "loss",            "mythologize"),
-    ("self_as_protector",    4, "contradiction",   "externalize_blame"),
-]
-
-# Reframe narratives: what Morgan 'tells herself' instead
-REFRAME_LIBRARY = {
-    "helplessness": [
-        "I was trapped. Anyone would have done the same.",
-        "There was no path that didn't end in loss.",
-        "I did everything I could with what I had.",
-    ],
-    "moral_failure": [
-        "It was her or me. That's not cruelty — that's survival.",
-        "People who weren't there can't judge what I had to do.",
-        "What looks monstrous from outside was the only door left open.",
-    ],
-    "shame": [
-        "Old Maret never understood what was at stake.",
-        "They didn't see what I was up against.",
-        "Judgment is easy when you weren't the one drowning.",
-    ],
-    "grief_for_self": [
-        "Grief is a luxury. I can't afford it.",
-        "She's gone. The only thing that matters now is staying alive.",
-        "Missing her doesn't undo anything.",
-    ],
-    "loss": [
-        "What we had died before that night. I grieve the person she was, not what she became.",
-        "She chose what she became. I chose to survive.",
-    ],
-    "contradiction": [
-        "Protecting yourself isn't a contradiction with caring. They coexist.",
-        "The same night you hold someone and let them go can be real.",
-    ],
-}
 
 
 class SelfConceptDefenseSystem:
@@ -117,10 +54,10 @@ class SelfConceptDefenseSystem:
     def __init__(
         self,
         identity_claims: Optional[list[str]] = None,
-        threat_map: Optional[list[tuple]] = None,
+        threat_rules: Optional[list[ThreatRule]] = None,
     ):
-        self.identity_claims = identity_claims or MORGAN_IDENTITY_CLAIMS
-        self.threat_map = threat_map or THREAT_MAP
+        self.identity_claims = identity_claims or []
+        self.threat_rules = threat_rules or []
         self.state = SelfConceptState(
             coherence=1.0,
             core_identity_claims=list(self.identity_claims),
@@ -153,11 +90,12 @@ class SelfConceptDefenseSystem:
         active_defenses: list[str] = []
         threatened_claims: list[str] = []
 
-        for node_id, activation in activated_nodes.items():
+        for node_id, activation_source in activated_nodes.items():
+            activation = self._coerce_activation(activation_source)
             if activation < 0.2:
                 continue  # sub-threshold activations don't threaten self-concept
 
-            threats = self._identify_threats(node_id, activation, emotional_state)
+            threats = self._identify_threats(node_id, activation, emotional_state, activation_source)
             for threat in threats:
                 active_threats.append(threat)
                 if threat.defense_mechanism not in active_defenses:
@@ -198,38 +136,91 @@ class SelfConceptDefenseSystem:
         node_id: str,
         activation: float,
         emotional_state: EmotionalState,
+        activation_context: Any | None = None,
     ) -> list[SelfConceptThreat]:
         """
         Check if this node pattern matches any identity threat.
         """
         threats = []
-        for (pattern, claim_idx, threat_type, defense) in self.threat_map:
-            if pattern in node_id or node_id in pattern:
-                # Threat intensity = activation * emotional amplifier
-                amplifier = 1.0
-                dominant = emotional_state.dominant
-                if dominant:
-                    if dominant.emotion in (EmotionType.SHAME, EmotionType.GUILT):
-                        amplifier = 1.0 + dominant.intensity * 0.5
-                    elif dominant.emotion == EmotionType.FEAR:
-                        amplifier = 1.0 + dominant.intensity * 0.3
+        for rule in self.threat_rules:
+            match = self._matches_rule(activation_context or node_id, rule)
+            if not match:
+                continue
 
-                threat_intensity = min(1.0, activation * amplifier)
+            amplifier = 1.0
+            dominant = emotional_state.dominant
+            if dominant:
+                if dominant.emotion in (EmotionType.SHAME, EmotionType.GUILT):
+                    amplifier = 1.0 + dominant.intensity * 0.5
+                elif dominant.emotion == EmotionType.FEAR:
+                    amplifier = 1.0 + dominant.intensity * 0.3
 
-                # Select reframe narrative
-                reframe = self._select_reframe(threat_type)
+            threat_intensity = min(1.0, activation * amplifier)
+            reframe = self._select_reframe(rule.threat_type)
 
-                threat = SelfConceptThreat(
-                    threatening_node=node_id,
-                    claim_idx=claim_idx,
-                    threat_type=threat_type,
-                    threat_intensity=threat_intensity,
-                    defense_mechanism=defense,
-                    reframe_narrative=reframe,
-                )
-                threats.append(threat)
+            threat = SelfConceptThreat(
+                threatening_node=node_id,
+                claim_idx=rule.threatened_claim_idx,
+                threat_type=rule.threat_type,
+                threat_intensity=threat_intensity,
+                defense_mechanism=rule.defense_mechanism,
+                reframe_narrative=reframe,
+            )
+            threats.append(threat)
 
         return threats
+
+    def _matches_rule(self, node_or_context: Any, rule: ThreatRule) -> bool:
+        if not rule.trigger_concepts:
+            return False
+
+        normalized_terms = {
+            term.lower()
+            for term in self._extract_match_terms(node_or_context)
+            if term
+        }
+        normalized_triggers = {
+            concept.lower()
+            for concept in rule.trigger_concepts
+            if concept
+        }
+        return bool(normalized_terms & normalized_triggers)
+
+    def _extract_match_terms(self, node_or_context: Any) -> list[str]:
+        if isinstance(node_or_context, str):
+            return [node_or_context]
+
+        if isinstance(node_or_context, dict):
+            payload = node_or_context
+        else:
+            payload = getattr(node_or_context, "metadata", {}) or {}
+
+        terms: list[str] = []
+        for key in ("associated_concepts", "concepts", "concept"):
+            value = payload.get(key, []) if isinstance(payload, dict) else None
+            if isinstance(value, str):
+                terms.extend([part.strip() for part in value.split(",") if part.strip()])
+            elif isinstance(value, (list, tuple, set)):
+                terms.extend(str(item) for item in value)
+
+        if isinstance(payload, dict):
+            for key in ("sensory_tags", "tags"):
+                value = payload.get(key, [])
+                if isinstance(value, str):
+                    terms.extend([part.strip() for part in value.split(",") if part.strip()])
+                elif isinstance(value, (list, tuple, set)):
+                    terms.extend(str(item) for item in value)
+
+        if not terms and hasattr(node_or_context, "associated_concepts"):
+            terms.extend(str(item) for item in node_or_context.associated_concepts)
+        if not terms and hasattr(node_or_context, "sensory_tags"):
+            terms.extend(str(item) for item in node_or_context.sensory_tags)
+        return terms
+
+    def _coerce_activation(self, activation_source: Any) -> float:
+        if isinstance(activation_source, dict):
+            return float(activation_source.get("activation", 0.0))
+        return float(activation_source)
 
     def _identity_claim_for_threat(
         self,
@@ -248,11 +239,7 @@ class SelfConceptDefenseSystem:
 
     def _select_reframe(self, threat_type: str) -> Optional[str]:
         """Select the most appropriate reframe narrative for this threat type."""
-        options = REFRAME_LIBRARY.get(threat_type, [])
-        if not options:
-            return None
-        # Simple selection: use turn count to vary across options
-        return options[self._turn_count % len(options)]
+        return None
 
     # ── DEFENSE INSTRUCTIONS FOR PIPELINE ────
 
@@ -306,6 +293,6 @@ class SelfConceptDefenseSystem:
     def deserialize(cls, data: dict) -> "SelfConceptDefenseSystem":
         system = cls()
         system.state.coherence = data.get("coherence", 1.0)
-        system.state.core_identity_claims = data.get("core_identity_claims", MORGAN_IDENTITY_CLAIMS)
+        system.state.core_identity_claims = data.get("core_identity_claims", [])
         system._turn_count = data.get("turn_count", 0)
         return system

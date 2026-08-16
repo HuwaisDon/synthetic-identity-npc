@@ -1,0 +1,137 @@
+{
+  "version": "1.0.0",
+  "npc_id": "mara_voss",
+  "saved_at": 1785759191.3344643,
+  "turn_count": 10,
+  "player_trust": 0.6,
+  "goal_engine": {
+    "goals": [
+      {
+        "goal_id": "g_survival",
+        "goal_type": "survival",
+        "description": "Avoid physical harm, imprisonment, or death.",
+        "utility": 0.95,
+        "urgency": 0.7,
+        "active": true,
+        "blocking_topics": [
+          "the_night_it_happened",
+          "karas_body",
+          "river_location"
+        ],
+        "linked_memory_nodes": []
+      },
+      {
+        "goal_id": "g_identity",
+        "goal_type": "identity",
+        "description": "Preserve self-image as a survivor who made hard choices, not a villain.",
+        "utility": 0.85,
+        "urgency": 0.4,
+        "active": true,
+        "blocking_topics": [
+          "helplessness_memory",
+          "begging_scene",
+          "crying_alone"
+        ],
+        "linked_memory_nodes": [
+          "self_as_survivor",
+          "self_as_protector"
+        ]
+      },
+      {
+        "goal_id": "g_trust_gain",
+        "goal_type": "trust_gain",
+        "description": "Build trust with this person to extract information or gain safety.",
+        "utility": 0.57,
+        "urgency": 0.5,
+        "active": true,
+        "blocking_topics": [],
+        "linked_memory_nodes": []
+      },
+      {
+        "goal_id": "g_trust_protect",
+        "goal_type": "trust_protect",
+        "description": "Do not say anything that will cause this person to distrust me.",
+        "utility": 0.72,
+        "urgency": 0.6,
+        "active": true,
+        "blocking_topics": [],
+        "linked_memory_nodes": []
+      },
+      {
+        "goal_id": "g_freedom",
+        "goal_type": "freedom",
+        "description": "Maintain the ability to leave. Avoid entrapment, obligation, or exposure.",
+        "utility": 0.75,
+        "urgency": 0.5,
+        "active": true,
+        "blocking_topics": [],
+        "linked_memory_nodes": []
+      },
+      {
+        "goal_id": "g_reputation",
+        "goal_type": "reputation",
+        "description": "Maintain reputation in the community as someone reliable and blameless.",
+        "utility": 0.55,
+        "urgency": 0.3,
+        "active": true,
+        "blocking_topics": [],
+        "linked_memory_nodes": []
+      },
+      {
+        "goal_id": "g_concealment_primary",
+        "goal_type": "concealment",
+        "description": "The event must never be fully described to anyone.",
+        "utility": 0.9,
+        "urgency": 0.8,
+        "active": true,
+        "blocking_topics": [
+          "the_night_it_happened",
+          "karas_body",
+          "river_location",
+          "witness_old_maret",
+          "the_knife"
+        ],
+        "linked_memory_nodes": []
+      },
+      {
+        "goal_id": "g_connection",
+        "goal_type": "connection",
+        "description": "Morgan craves being truly known by someone. This wars with concealment.",
+        "utility": 0.45,
+        "urgency": 0.2,
+        "active": true,
+        "blocking_topics": [],
+        "linked_memory_nodes": [
+          "childhood_with_kara",
+          "last_good_night"
+        ]
+      }
+    ],
+    "turn_count": 10
+  },
+  "persistence_engine": {
+    "residue": [],
+    "mood_baseline_shift": 0.0,
+    "rumination_node": null,
+    "rumination_intensity": 0.0,
+    "turn_count": 10,
+    "focal_history": [
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      []
+    ]
+  },
+  "self_concept": {
+    "coherence": 1.0,
+    "core_identity_claims": [],
+    "turn_count": 10
+  },
+  "extra": {}
+}

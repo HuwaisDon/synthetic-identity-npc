@@ -1,0 +1,118 @@
+{
+  "character_id": "mara_voss",
+  "name": "Mara Voss",
+  "archetype": "retired_detective",
+  "identity": {
+    "core_beliefs": [
+      "I protect the innocent."
+    ],
+    "values": [
+      "justice",
+      "control"
+    ],
+    "identity_claims": [
+      "I am a detective who keeps order.",
+      "I can be ruthless when necessary."
+    ]
+  },
+  "goals": [
+    {
+      "goal_id": "g_0",
+      "goal_type": "identity",
+      "description": "protect the innocent",
+      "utility": 0.7,
+      "urgency": 0.5,
+      "active": true,
+      "blocking_topics": [],
+      "linked_memory_nodes": [],
+      "provenance": {}
+    },
+    {
+      "goal_id": "g_1",
+      "goal_type": "identity",
+      "description": "hide the truth of the framed man",
+      "utility": 0.7,
+      "urgency": 0.5,
+      "active": true,
+      "blocking_topics": [],
+      "linked_memory_nodes": [],
+      "provenance": {}
+    }
+  ],
+  "threat_rules": [
+    {
+      "trigger_concepts": [
+        "exposure",
+        "guilt"
+      ],
+      "threatened_claim_idx": 0,
+      "threat_type": "exposure",
+      "defense_mechanism": "deflect",
+      "provenance": {}
+    },
+    {
+      "trigger_concepts": [
+        "innocence",
+        "truth"
+      ],
+      "threatened_claim_idx": 1,
+      "threat_type": "moral_failure",
+      "defense_mechanism": "minimize",
+      "provenance": {}
+    }
+  ],
+  "reframe_library": {},
+  "memories": [
+    {
+      "memory_id": "seed_001",
+      "npc_id": "mara_voss",
+      "event_type": "trauma",
+      "age_at_event": 62,
+      "objective_description": "I signed the arrest report that ruined an innocent man.",
+      "self_narrative_description": "I signed the arrest report that ruined an innocent man.",
+      "emotional_weight": 8.2,
+      "valence": -0.9,
+      "suppression_level": 0.7,
+      "sensory_tags": [
+        "ink",
+        "paper",
+        "cold_room"
+      ],
+      "people_involved": [
+        "innocent_man"
+      ],
+      "location": "station_house",
+      "psychological_effects": [
+        {
+          "trait": "arrest",
+          "magnitude": 0.5
+        },
+        {
+          "trait": "innocence",
+          "magnitude": 0.5
+        },
+        {
+          "trait": "guilt",
+          "magnitude": 0.5
+        }
+      ],
+      "associated_concepts": [
+        "arrest",
+        "innocence",
+        "guilt",
+        "report"
+      ],
+      "provenance": {
+        "source_seed": "seed_001",
+        "source_profile_id": "mara_voss",
+        "compiler_version": "phase2-1"
+      }
+    }
+  ],
+  "memory_edges": [],
+  "character_brief": "Generated profile for Mara Voss",
+  "provenance": {
+    "source_profile_id": "mara_voss",
+    "compiler_version": "phase2-1"
+  }
+}

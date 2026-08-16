@@ -28,6 +28,7 @@ from typing import Optional
 from schemas.cognitive_schemas import (
     Goal, GoalState, GoalType, EmotionalState, EmotionType
 )
+from schemas.character_schema import CharacterSchema, GoalTemplate
 
 logger = logging.getLogger(__name__)
 
@@ -38,16 +39,29 @@ logger = logging.getLogger(__name__)
 # Goals have baseline utilities; runtime updates shift them.
 # ─────────────────────────────────────────────
 
-def build_morgan_goal_profile() -> list[Goal]:
-    """
-    Construct Morgan's initial motivational architecture.
-    
-    Design note:
-      These are not 'quest objectives.' They are psychological drives.
-      Morgan's identity goal will fight her connection goal.
-      Her concealment goal fights her trust_gain goal.
-      This tension is where her character lives.
-    """
+def build_goal_profile(character: CharacterSchema | None = None) -> list[Goal]:
+    """Construct an initial motivational architecture from a character definition."""
+    if character and character.goals:
+        goals = []
+        for template in character.goals:
+            try:
+                goal_type = GoalType(template.goal_type)
+            except ValueError:
+                goal_type = GoalType.IDENTITY
+            goals.append(
+                Goal(
+                    goal_id=template.goal_id,
+                    goal_type=goal_type,
+                    description=template.description,
+                    utility=template.utility,
+                    urgency=template.urgency,
+                    active=template.active,
+                    blocking_topics=list(template.blocking_topics),
+                    linked_memory_nodes=list(template.linked_memory_nodes),
+                )
+            )
+        return goals
+
     return [
         Goal(
             goal_id="g_survival",
